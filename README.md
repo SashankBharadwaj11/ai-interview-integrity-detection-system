@@ -1,109 +1,110 @@
-# 🎥🔍 AI Interview Integrity Detection System  
-*Offline Audio + Video Monitoring for Exams & Interviews*
+# 🎥 AI Interview Integrity Detection System  
+### Offline Audio + Video Monitoring for Exams & Interviews
 
-This project performs **offline integrity analysis** on pre-recorded **video + audio** to identify suspicious behavior during exams or interviews.
+This system performs **offline integrity analysis** on pre-recorded **video + audio** to detect suspicious behavior in online interviews or exam sessions.  
+It generates a detailed **Session Integrity Report** containing:
 
-It generates a detailed **Session Integrity Report** including:
-- Face presence tracking  
+- Face presence timeline  
 - Eye & gaze direction  
-- Blink rate / EAR  
-- Object detection  
-- Multi-face presence  
-- Speaker consistency scoring  
-- Timeline graphs  
+- Blink/EAR activity  
+- Forbidden object detection  
+- Multi-face detection  
+- Speaker consistency (WavLM)  
+- Timeline charts (Chart.js)  
 - Combined integrity score  
 
-All processing runs **locally** — no uploads or data sharing.
+Everything is processed **locally** — no cloud upload or external servers.
+
+---
+
+# 📌 Table of Contents
+
+1. [Features](#-features)  
+2. [Project Architecture](#-project-architecture)  
+3. [Installation](#-installation)  
+4. [Running the Application](#-running-the-application)  
+5. [How to Use](#-how-to-use)  
+6. [Scoring System](#-scoring-system)  
+7. [Models Used](#-models-used)  
+8. [Configuration](#-configuration)  
+9. [Privacy](#-privacy)  
+10. [Future Enhancements](#-future-enhancements)
 
 ---
 
 # 🚀 Features
 
-## 🎞️ Video Analysis
-- Face detection (MTCNN – facenet-pytorch)  
-- Eye tracking & facial landmarks (MediaPipe FaceMesh)  
-- Gaze direction classification (left/right/up/down/center)  
-- Blink detection via EAR  
+## 🎞️ Video Analysis  
+- Face detection (MTCNN)  
+- Eye tracking (MediaPipe FaceMesh)  
+- Gaze direction classification  
+- Blink detection (EAR)  
 - Face-missing alerts  
 - Multi-face detection  
 
-## 📦 Object Detection
-Model: **YOLOv8-Nano (Ultralytics)**  
-Detects:
-- 📱 Mobile phones  
-- 📚 Books / notes  
-- 📝 Papers  
-- (Extendable via `object_detection.py`)  
+## 📦 Object Detection  
+- YOLOv8-Nano  
+- Detects: mobile phones, books, paper  
+- FPS-aware optimized inference  
 
-## 🔊 Audio Integrity Analysis
-Powered by **WavLM-Base+ (HuggingFace)**
-
-Pipeline:
-1. Extract audio (ffmpeg)  
-2. Split audio (2–3 sec chunks)  
-3. Compute embeddings  
-4. Compare cosine similarity  
-5. Detect speaker change  
-
-Outputs:
-- Average similarity  
-- Minimum similarity  
-- Speaker change flag  
+## 🔊 Audio Integrity Analysis  
+- WavLM-Base+ embeddings  
+- Chunk-based speaker similarity  
+- Minimum/average similarity  
+- Speaker change detection  
 - Audio integrity score (0–100)  
 
-## 📑 Session Integrity Report
-- Alerts summary  
-- Object detection activity  
+## 📑 Session Integrity Report  
 - Timeline graphs (Chart.js)  
 - Speaker consistency graph  
+- Gaze + object alerts  
 - Combined score  
-- Auto-saved JSON reports  
-- Displayed via Flask dashboard  
+- JSON generated under `logs/sessions/`  
+- Flask dashboard UI  
 
 ---
 
 # 🧱 Project Architecture
 
+```plaintext
 ai-interview-integrity-detection-system/
 │
 ├── src/
-│ ├── dashboard/ # Flask dashboard UI
-│ │ ├── app.py
-│ │ └── templates/ # HTML templates
-│ │ ├── dashboard.html
-│ │ ├── upload.html
-│ │ └── session_report.html
-│ │
-│ ├── detection/ # Video detection modules
-│ │ ├── face_detection.py
-│ │ ├── eye_tracking.py
-│ │ ├── object_detection.py
-│ │ └── multi_face.py
-│ │
-│ ├── audio/ # Audio processing modules
-│ │ ├── speaker_consistency.py
-│ │ └── utils_audio.py
-│ │
-│ ├── analysis/ # Scoring + reporting logic
-│ │ ├── scoring.py
-│ │ └── report_generator.py
-│ │
-│ ├── utils/ # Utility helpers
-│ │ ├── logging.py
-│ │ ├── screenshot_utils.py
-│ │ └── timer.py
-│ │
-│ ├── offline_processor.py # Full offline pipeline
-│ └── config.yaml # Detection configuration
+│   ├── dashboard/
+│   │   ├── app.py
+│   │   └── templates/
+│   │       ├── dashboard.html
+│   │       ├── upload.html
+│   │       └── session_report.html
+│   │
+│   ├── detection/
+│   │   ├── face_detection.py
+│   │   ├── eye_tracking.py
+│   │   ├── object_detection.py
+│   │   └── multi_face.py
+│   │
+│   ├── audio/
+│   │   ├── speaker_consistency.py
+│   │   └── utils_audio.py
+│   │
+│   ├── analysis/
+│   │   ├── scoring.py
+│   │   └── report_generator.py
+│   │
+│   ├── utils/
+│   │   ├── logging.py
+│   │   ├── screenshot_utils.py
+│   │   └── timer.py
+│   │
+│   ├── offline_processor.py
+│   └── config.yaml
 │
-├── uploads/ # Uploaded video/audio
+├── uploads/
 ├── logs/
-│ └── sessions/ # JSON session reports
+│   └── sessions/
 │
 ├── requirements.txt
 └── README.md
-
-
 ---
 
 # ⚙️ Installation
