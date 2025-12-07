@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+  <title>Upload Recording</title>
+</head>
+<body>
+  <h1>Upload prerecorded exam recording</h1>
+
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <ul>
+        {% for m in messages %}
+          <li>{{ m }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+
+  <form method="post" enctype="multipart/form-data">
+    <div>
+      <label>Video file (mp4/avi/mov/mkv):</label>
+      <input type="file" name="video" required>
+    </div>
+    <div>
+      <label>Audio file (wav/mp3/m4a):</label>
+      <input type="file" name="audio" required>
+    </div>
+    <button type="submit">Analyze</button>
+  </form>
+
+  <p><a href="{{ url_for('dashboard') }}">Back to dashboard</a></p>
+</body>
+</html>
