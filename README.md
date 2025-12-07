@@ -1,270 +1,235 @@
-🎥🔍 AI Interview Integrity Detection System
-Offline Audio + Video Analysis for Exam/Interview Monitoring
+# 🎥🔍 AI Interview Integrity Detection System  
+*Offline Audio + Video Monitoring for Exams & Interviews*
 
-This project is an AI-driven integrity analysis system that processes offline video + audio recordings to detect suspicious behavior during online interviews or exam sessions.
+This project performs **offline integrity analysis** on pre-recorded **video + audio** to identify suspicious behavior during exams or interviews.
 
-It generates a detailed Session Integrity Report with:
+It generates a detailed **Session Integrity Report** including:
+- Face presence tracking  
+- Eye & gaze direction  
+- Blink rate / EAR  
+- Object detection  
+- Multi-face presence  
+- Speaker consistency scoring  
+- Timeline graphs  
+- Combined integrity score  
 
-🧑‍💻 Face presence tracking
+All processing runs **locally** — no uploads or data sharing.
 
-👀 Eye & gaze direction analysis
+---
 
-🧭 Blink/EAR tracking
+# 🚀 Features
 
-🧍‍♂️ Multi-face detection
+## 🎞️ Video Analysis
+- Face detection (MTCNN – facenet-pytorch)  
+- Eye tracking & facial landmarks (MediaPipe FaceMesh)  
+- Gaze direction classification (left/right/up/down/center)  
+- Blink detection via EAR  
+- Face-missing alerts  
+- Multi-face detection  
 
-📱📚 Forbidden object detection
-
-🔊 Speaker-consistency scoring using WavLM
-
-📊 Timeline visualizations (Chart.js)
-
-⭐ Overall integrity score (0–100)
-
-Everything runs locally on the user’s machine — no data leaves the system.
-
-🚀 Key Features
-🎞️ Video Analysis
-
-Face detection (MTCNN, facenet-pytorch)
-
-Eye tracking (MediaPipe FaceMesh)
-
-Gaze classification: left, right, center, up, down
-
-EAR-based blink detection
-
-Face-missing event alerts
-
-Multi-face detection (detect extra persons)
-
-FPS-aware optimizations
-
-📦 Object Detection
-
-Model: YOLOv8-Nano (Ultralytics)
+## 📦 Object Detection
+Model: **YOLOv8-Nano (Ultralytics)**  
 Detects:
+- 📱 Mobile phones  
+- 📚 Books / notes  
+- 📝 Papers  
+- (Extendable via `object_detection.py`)  
 
-📱 Mobile phones
-
-📚 Books/notes
-
-📝 Paper sheets
-
-(Easily extendable via object_detection.py)
-
-🔊 Audio Integrity Analysis
-
-Powered by WavLM-Base+ (HuggingFace).
+## 🔊 Audio Integrity Analysis
+Powered by **WavLM-Base+ (HuggingFace)**
 
 Pipeline:
+1. Extract audio (ffmpeg)  
+2. Split audio (2–3 sec chunks)  
+3. Compute embeddings  
+4. Compare cosine similarity  
+5. Detect speaker change  
 
-Extract audio (ffmpeg)
+Outputs:
+- Average similarity  
+- Minimum similarity  
+- Speaker change flag  
+- Audio integrity score (0–100)  
 
-Split into chunks (2–3 seconds)
+## 📑 Session Integrity Report
+- Alerts summary  
+- Object detection activity  
+- Timeline graphs (Chart.js)  
+- Speaker consistency graph  
+- Combined score  
+- Auto-saved JSON reports  
+- Displayed via Flask dashboard  
 
-Generate embeddings per chunk
+---
 
-Compute:
+# 🧱 Project Architecture
 
-Average similarity
-
-Minimum chunk similarity
-
-Speaker change probability
-
-Final Speaker Consistency Score (0–100)
-
-📑 Session Integrity Report
-
-Generated via report_generator.py.
-
-Includes:
-
-Alerts summary
-
-Object detection hits
-
-Video activity timeline
-
-Speaker consistency graph
-
-Weighted combined integrity score
-
-Auto-saved JSON at logs/sessions/
-
-Rendered with Flask templates
-
-🧱 Project Architecture
 ai-interview-integrity-detection-system/
 │
 ├── src/
-│   ├── dashboard/                  # Flask Web UI
-│   │   ├── app.py
-│   │   └── templates/
-│   │       ├── dashboard.html
-│   │       ├── upload.html
-│   │       └── session_report.html
-│   │
-│   ├── detection/                  # Video detection modules
-│   │   ├── face_detection.py
-│   │   ├── eye_tracking.py
-│   │   ├── object_detection.py
-│   │   └── multi_face.py
-│   │
-│   ├── audio/                      # Audio pipeline
-│   │   ├── speaker_consistency.py
-│   │   └── utils_audio.py
-│   │
-│   ├── analysis/                   # Scoring logic
-│   │   ├── scoring.py
-│   │   └── report_generator.py
-│   │
-│   ├── utils/
-│   │   ├── logging.py
-│   │   ├── screenshot_utils.py
-│   │   └── timer.py
-│   │
-│   ├── offline_processor.py        # Main offline pipeline
-│   └── config.yaml                 # Detection parameters
+│ ├── dashboard/ # Flask dashboard UI
+│ │ ├── app.py
+│ │ └── templates/ # HTML templates
+│ │ ├── dashboard.html
+│ │ ├── upload.html
+│ │ └── session_report.html
+│ │
+│ ├── detection/ # Video detection modules
+│ │ ├── face_detection.py
+│ │ ├── eye_tracking.py
+│ │ ├── object_detection.py
+│ │ └── multi_face.py
+│ │
+│ ├── audio/ # Audio processing modules
+│ │ ├── speaker_consistency.py
+│ │ └── utils_audio.py
+│ │
+│ ├── analysis/ # Scoring + reporting logic
+│ │ ├── scoring.py
+│ │ └── report_generator.py
+│ │
+│ ├── utils/ # Utility helpers
+│ │ ├── logging.py
+│ │ ├── screenshot_utils.py
+│ │ └── timer.py
+│ │
+│ ├── offline_processor.py # Full offline pipeline
+│ └── config.yaml # Detection configuration
 │
-├── uploads/                         # User-uploaded video/audio
+├── uploads/ # Uploaded video/audio
 ├── logs/
-│   └── sessions/                    # JSON reports
+│ └── sessions/ # JSON session reports
 │
 ├── requirements.txt
 └── README.md
 
-⚙️ Installation
-1️⃣ Create Conda Environment
+
+---
+
+# ⚙️ Installation
+
+## 1️⃣ Create Conda Environment
+```bash
 conda create -n interview310 python=3.10
 conda activate interview310
-
 2️⃣ Install Dependencies
+bash
+Copy code
 pip install -r requirements.txt
-
-3️⃣ Install ffmpeg (Required)
-
+3️⃣ Install ffmpeg (Required for audio extraction)
 macOS:
-
+bash
+Copy code
 brew install ffmpeg
-
 🧪 Running the Application
-
 Start the Flask dashboard:
 
+bash
+Copy code
 python -m src.dashboard.app
+Now open:
 
-
-Then visit:
-
+cpp
+Copy code
 http://127.0.0.1:5000
-
 📤 How to Use the System
+Upload video recording
 
-Upload pre-recorded video
-
-Upload associated audio file (recommended same duration)
+Upload audio recording
 
 Click Analyze Recording
 
-Processing takes about 1–2 minutes per 15-minute video
+Processing time: 1–2 min per 15 min video
 
-View the full Session Integrity Report
+View Session Integrity Report
 
 📊 Scoring System
 🎞️ Video Integrity Score (0–100)
-
-Penalizes:
+Penalties for:
 
 Face missing
 
-Gaze away (L/R/U/D)
+Looking away (L/R/U/D)
 
 Excessive eye movement
 
-Multiple faces
+Multi-face detection
 
 Forbidden objects
 
 🔊 Audio Integrity Score (0–100)
-
 Based on WavLM similarity:
 
-✔ High similarity → same speaker
+High similarity = same speaker
 
-❌ Sudden drops → possible speaker change
+Low similarity = possible switch
 
-❗ speaker_change_flag = True → penalty applied
+speaker_change_flag = True → penalty applied
 
-⭐ Overall Score
+⭐ Combined Overall Score
+Formula:
+
+python
+Copy code
 overall_score = 0.7 * video_score + 0.3 * audio_score
-
 🧠 Models Used
 Task	Model	Framework
 Face Detection	MTCNN	facenet-pytorch
-Eye/Gaze Tracking	FaceMesh	MediaPipe
+Eye Tracking	FaceMesh	MediaPipe
 Object Detection	YOLOv8n	Ultralytics
-Speaker Embeddings	WavLM-Base+	HuggingFace
+Speaker Embeddings	WavLM-Base+	HuggingFace Transformers
 Audio Extraction	ffmpeg	subprocess
-🧩 Configuration
 
-Modify detection behavior via:
+🧩 Configuration (config.yaml)
+Below is a sample config:
 
-src/config.yaml
-
-
-Example:
-
+yaml
+Copy code
 detection:
   face:
     detection_interval: 5
     min_confidence: 0.8
+
   eyes:
     gaze_threshold: 2
     blink_threshold: 0.3
+
   objects:
     min_confidence: 0.65
     max_fps: 5
 
 audio_monitoring:
   sample_rate: 16000
+Modify these to customize system behavior.
 
-🧼 Code Quality Enhancements
-
+🧼 Code Quality Improvements
 Unified scoring pipeline
 
-Improved JSON schemas
+Robust JSON schema
 
-Robust Jinja templates
+Cleaner Jinja templates
 
-Optimized YOLO inference
+YOLO inference optimization
 
-Modularized audio engine
+Isolated audio subsystem
 
-Cleaner folder structure
+Environment fixes
 
-Single unified conda environment
+Removed duplicate envs + conflicts
 
-Fixed transformers & tokenizers conflicts
+Support for command-line offline processing
 
-🛡️ Privacy Guarantee
-
-✔ No cloud upload
-✔ No logging of raw video/audio
-✔ 100% offline processing
-✔ Suitable for exams, interviews, assessments
 
 📬 Future Enhancements
+Real-time webcam detection
 
-Real-time detection (live webcam)
+Emotion detection
 
-OCR for reading notes on desk
+OCR for desk notes
 
-Emotion recognition
-
-Speaker diarization improvements
+Multi-speaker diarization
 
 Deepfake voice detection
 
-GPU-accelerated cloud API (FastAPI)
+GPU FastAPI deployment
+
