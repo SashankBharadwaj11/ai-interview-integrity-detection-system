@@ -1,0 +1,30 @@
+# Environment
+interview310/
+venv/
+env/
+.venv/
+
+# Python files
+__pycache__/
+*.pyc
+*.pyo
+
+# System/IDE files
+.DS_Store
+.vscode/
+
+# Temp folders
+cache/
+tmp/
+
+# Uploaded media
+uploads/*
+!uploads/.gitkeep
+
+# Logs
+logs/sessions/*
+!logs/sessions/.gitkeep
+
+# Model / downloaded weights
+models/
+.checkpoints/

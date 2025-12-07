@@ -1,0 +1,168 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Exam Integrity Dashboard</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #0f172a;
+      color: #e5e7eb;
+    }
+
+    header {
+      padding: 16px 24px;
+      background: #020617;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #1f2937;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.4rem;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: none;
+      text-decoration: none;
+      font-size: 0.9rem;
+      cursor: pointer;
+      background: #22c55e;
+      color: #022c22;
+      font-weight: 600;
+    }
+
+    .btn-secondary {
+      background: #1f2937;
+      color: #e5e7eb;
+    }
+
+    main {
+      padding: 20px 24px 32px;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    .flash-messages {
+      margin-bottom: 12px;
+    }
+
+    .flash-messages li {
+      list-style: none;
+      background: #1f2937;
+      border-left: 3px solid #22c55e;
+      padding: 8px 10px;
+      margin-bottom: 6px;
+      font-size: 0.85rem;
+    }
+
+    .card {
+      background: #020617;
+      border-radius: 12px;
+      padding: 16px 18px;
+      margin-bottom: 16px;
+      border: 1px solid #1f2937;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .session-meta {
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.70rem;
+      background: #1f2937;
+      color: #9ca3af;
+      margin-left: 4px;
+    }
+
+    a {
+      color: inherit;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Exam Integrity Dashboard</h1>
+    <div>
+      <a href="{{ url_for('upload_recording') }}" class="btn">+ Analyze prerecorded session</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="flash-messages">
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          <ul>
+            {% for m in messages %}
+              <li>{{ m }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      {% endwith %}
+    </div>
+
+    {% if sessions and sessions|length > 0 %}
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Sessions</div>
+          <span class="session-meta">{{ sessions|length }} recorded session(s)</span>
+        </div>
+
+        {% for s in sessions %}
+          <div style="padding: 8px 0; border-top: 1px solid #111827; margin-top: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <a href="{{ url_for('session_report', session_id=s.session_id) }}"
+                   style="text-decoration:none;">
+                  <strong>Session {{ s.session_id }}</strong>
+                </a>
+                <div class="session-meta">
+                  Duration: {{ '%.1f'|format(s.duration_seconds) }}s |
+                  Frames: {{ s.num_frames }} |
+                  FPS: {{ '%.1f'|format(s.fps) }}
+                </div>
+              </div>
+              <div>
+                <a href="{{ url_for('session_report', session_id=s.session_id) }}" class="btn-secondary btn">
+                  View report
+                </a>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="card">
+        <div class="card-title">No sessions yet</div>
+        <p class="session-meta">
+          Upload a prerecorded webcam + audio pair to generate your first integrity report.
+        </p>
+        <a href="{{ url_for('upload_recording') }}" class="btn">Upload recording</a>
+      </div>
+    {% endif %}
+  </main>
+</body>
+</html>
