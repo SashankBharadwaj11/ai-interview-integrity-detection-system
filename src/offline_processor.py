@@ -23,6 +23,7 @@ from .utils.logging import AlertLogger
 from .utils.violation_logger import ViolationLogger
 from .utils.screenshot_utils import ViolationCapturer
 from .reporting.report_generator import ReportGenerator
+from .analysis.alert_severity import compute_severity 
 
 from .analysis.scoring import (
     compute_video_score,
@@ -98,6 +99,12 @@ class OfflineExamAnalyzer:
         self.screenshots_dir = Path(screenshots_dir)
         self.screenshots_dir.mkdir(parents=True, exist_ok=True)
 
+        self.output_cfg = self.cfg.get("output", {})
+        self.annotated_dir = Path(
+            self.output_cfg.get("annotated_video_dir", "./logs/annotated_videos")
+        )
+        self.annotated_dir.mkdir(parents=True, exist_ok=True)
+
         # --- detectors expect the FULL config dict (they access config['detection'][...]) ---
         self.face_detector = FaceDetector(self.cfg)
         self.eye_tracker = EyeTracker(self.cfg)
@@ -124,294 +131,504 @@ class OfflineExamAnalyzer:
         self._multi_face_frames = 0
 
     # -------------------------------------------------------------
-    # MAIN ENTRY: analyze a prerecorded video (audio is dummy)
+    # MAIN ENTRY: analyze a prerecorded video
     # -------------------------------------------------------------
-    def analyze_video(
-        self,
-        video_path: str,
-        session_id: Optional[str] = None,
-        audio_path: Optional[str] = None,   # accepted but ignored
-    ) -> SessionSummary:
+    def analyze_video(self, video_path: str, audio_path: Optional[str] = None):
         """
-        Run offline analysis on a prerecorded webcam video.
+        Offline analysis of a pre-recorded video (+ optional separate audio file).
 
-        :param video_path: path to video file recorded during exam.
-        :param session_id: optional explicit session id; if None, derived from timestamp.
-        :param audio_path: path to audio file (ignored – dummy skip).
+        - Runs all video detectors (face, gaze, multi-face, objects, mouth)
+        - Optionally analyzes audio with SpeakerConsistencyAnalyzer
+        - Writes an annotated video with overlays
+        - Logs alerts & scores to a JSON file
         """
-        video_path = str(video_path)
-        session_id = session_id or self._generate_session_id(video_path)
-
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            raise RuntimeError(f"Cannot open video file: {video_path}")
+            raise RuntimeError(f"Could not open video: {video_path}")
 
-        fps = cap.get(cv2.CAP_PROP_FPS) or self.cfg.get("video", {}).get("fps", 30.0)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        alerts: List[AlertEvent] = []
+        session_id = self._generate_session_id(video_path)
+        start_time = datetime.now()
 
+        # --- optional audio analysis (speaker consistency) ---
+        audio_summary = None
+        if audio_path:
+            try:
+                speaker_analyzer = SpeakerConsistencyAnalyzer()
+                audio_summary = speaker_analyzer.analyze(audio_path)
+            except Exception as e:
+                audio_summary = {"error": str(e)}
+
+        # --- annotated video writer ---
+        save_annotated = bool(self.output_cfg.get("save_annotated_video", True))
+        writer = None
+        annotated_path = None
+
+        if save_annotated:
+            fourcc = cv2.VideoWriter_fourcc(
+                *self.output_cfg.get("annotated_codec", "mp4v")
+            )
+            annotated_path = str(self.annotated_dir / f"{session_id}.mp4")
+            writer = cv2.VideoWriter(annotated_path, fourcc, fps, (width, height))
+
+        # --- main loop ---
         frame_idx = 0
-        processed_frame_idx = 0  # count only frames we actually analyze
-        last_objects_detected = False
-        last_object_list: List[Dict[str, Any]] = []
-        last_multiple_faces = False
-        last_num_faces = 1
+        alerts = []
+        face_missing_start = None
+        gaze_away_start = None
 
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
 
-            # timestamp based on original frame index (not just processed frames)
-            t = frame_idx / fps if fps > 0 else 0.0
-
-            # --- Frame skipping: process only every Nth frame ---
-            if FRAME_STRIDE > 1 and (frame_idx % FRAME_STRIDE != 0):
-                frame_idx += 1
-                continue
-
-            # --- Resize frame for much faster detection ---
-            if RESIZE_WIDTH is not None:
-                h, w = frame.shape[:2]
-                if w > RESIZE_WIDTH:
-                    scale = RESIZE_WIDTH / float(w)
-                    new_size = (RESIZE_WIDTH, int(h * scale))
-                    frame_small = cv2.resize(frame, new_size)
-                else:
-                    frame_small = frame
-            else:
-                frame_small = frame
-
-            # --- 1. Call detectors on the smaller frame ---
-
-            # Face detection
-            face_present = self.face_detector.detect_face(frame_small)
-
-            # Eye tracking
-            gaze_direction, eye_ratio = self.eye_tracker.track_eyes(frame_small)
-
-            # Mouth movement
-            mouth_moving = self.mouth_monitor.monitor_mouth(frame_small)
-
-            # Object detection: run only every OBJ_DETECT_EVERY processed frames
-            if OBJ_DETECT_EVERY > 1 and (processed_frame_idx % OBJ_DETECT_EVERY != 0):
-                objects_detected = last_objects_detected
-                object_list = last_object_list
-            else:
-                obj_result = self.object_detector.detect_objects(frame_small)
-                if isinstance(obj_result, tuple) and len(obj_result) == 2:
-                    objects_detected, object_list = obj_result
-                elif isinstance(obj_result, list):
-                    object_list = obj_result
-                    objects_detected = len(object_list) > 0
-                else:
-                    objects_detected = bool(obj_result)
-                    object_list = []
-
-                last_objects_detected = objects_detected
-                last_object_list = object_list
-
-            # Multi-face detection: run only every MF_DETECT_EVERY processed frames
-            if MF_DETECT_EVERY > 1 and (processed_frame_idx % MF_DETECT_EVERY != 0):
-                multiple_faces = last_multiple_faces
-                num_faces = last_num_faces
-            else:
-                mf_result = self.multi_face_detector.detect_multiple_faces(frame_small)
-                if isinstance(mf_result, tuple) and len(mf_result) == 2:
-                    multiple_faces, num_faces = mf_result
-                elif isinstance(mf_result, (int, float)):
-                    num_faces = int(mf_result)
-                    multiple_faces = num_faces > 1
-                else:
-                    multiple_faces = bool(mf_result)
-                    num_faces = 2 if multiple_faces else 1
-
-                last_multiple_faces = multiple_faces
-                last_num_faces = num_faces
-
-            # --- 2. Convert detector outputs into alerts ---
-            frame_alerts = self._generate_alerts(
-                session_id=session_id,
-                frame_idx=frame_idx,        # original frame index
-                t=t,
-                face_present=face_present,
-                gaze_direction=gaze_direction,
-                eye_ratio=eye_ratio,
-                mouth_moving=mouth_moving,
-                multiple_faces=multiple_faces,
-                num_faces=num_faces,
-                objects_detected=objects_detected,
-                object_list=object_list,
-                frame=frame_small,          # we pass the resized frame to violation logging
-            )
-
-            alerts.extend(frame_alerts)
-            processed_frame_idx += 1
             frame_idx += 1
+            timestamp_s = frame_idx / fps
+
+            # --- run detectors ---
+            face_present = self.face_detector.detect_face(frame)
+            # Handle both 2-value and 3-value returns from EyeTracker
+            eye_res = self.eye_tracker.track_eyes(frame)
+            if isinstance(eye_res, tuple) and len(eye_res) == 3:
+                gaze_direction, eye_ratio, gaze_vec = eye_res
+            else:
+                # Legacy behavior: (gaze_direction, eye_ratio)
+                gaze_direction, eye_ratio = eye_res
+                gaze_vec = None
+                
+            mouth_moving = self.mouth_monitor.monitor_mouth(frame)
+            objects_detected, object_list = self.object_detector.detect_objects(frame)
+            
+            # Handle both possible signatures of multi_face_detector:
+            #   - returns bool
+            #   - or returns (bool, num_faces)
+            # Multi-face detector: now returns (multiple_faces, num_faces, face_boxes)
+            mf_result = self.multi_face_detector.detect_multiple_faces(frame)
+            if isinstance(mf_result, tuple) and len(mf_result) == 3:
+                multiple_faces, num_faces, face_boxes = mf_result
+            else:
+                # backward-compat fallback
+                multiple_faces = bool(mf_result)
+                num_faces = 1 if face_present else 0
+                face_boxes = []
+
+            # --- build contextual state for this frame ---
+            frame_ctx = {
+                "face_present": face_present,
+                "gaze_direction": gaze_direction,
+                "eye_ratio": eye_ratio,
+                "gaze_vector": gaze_vec,    
+                "mouth_moving": mouth_moving,
+                "objects": object_list,
+                "multiple_faces": multiple_faces,
+                "num_faces": num_faces,
+                "face_boxes": face_boxes,     
+            }
+
+            frame_alerts = self._generate_alerts(timestamp_s, frame_ctx)
+
+            if writer is not None:
+                self._draw_overlays(frame, frame_idx, timestamp_s, frame_alerts, frame_ctx)
+                writer.write(frame)
+
+            # track durations for behavioral alerts
+            # FACE_MISSING duration
+            if not face_present:
+                if face_missing_start is None:
+                    face_missing_start = timestamp_s
+                face_missing_duration = timestamp_s - face_missing_start
+            else:
+                face_missing_duration = 0.0
+                face_missing_start = None
+
+            # GAZE_AWAY duration
+            if gaze_direction in ("left", "right", "up", "down"):
+                if gaze_away_start is None:
+                    gaze_away_start = timestamp_s
+                gaze_away_duration = timestamp_s - gaze_away_start
+            else:
+                gaze_away_duration = 0.0
+                gaze_away_start = None
+
+            frame_ctx["face_missing_duration"] = face_missing_duration
+            frame_ctx["gaze_away_duration"] = gaze_away_duration
+
+            # --- generate alerts with meaningful severity/details ---
+            frame_alerts = []
+
+            if not face_present and face_missing_duration >= 1.0:
+                details = {"duration_sec": face_missing_duration}
+                frame_alerts.append({
+                    "timestamp": timestamp_s,
+                    "type": "FACE_MISSING",
+                    "severity": compute_severity("FACE_MISSING", details),
+                    "details": details,
+                })
+
+            if gaze_direction in ("left", "right", "up", "down") and gaze_away_duration >= 1.0:
+                details = {
+                    "direction": gaze_direction,
+                    "eye_ratio": eye_ratio,
+                    "duration_sec": gaze_away_duration,
+                }
+                frame_alerts.append({
+                    "timestamp": timestamp_s,
+                    "type": "GAZE_AWAY",
+                    "severity": compute_severity("GAZE_AWAY", details),
+                    "details": details,
+                })
+
+            if multiple_faces and num_faces >= 2:
+                details = {"num_faces": num_faces}
+                frame_alerts.append({
+                    "timestamp": timestamp_s,
+                    "type": "MULTI_FACE",
+                    "severity": compute_severity("MULTI_FACE", details),
+                    "details": details,
+                })
+
+            if objects_detected:
+                for obj in object_list:
+                    details = {
+                        "label": obj["label"],
+                        "confidence": obj["confidence"],
+                        "bbox": obj["bbox"],
+                    }
+                    frame_alerts.append({
+                        "timestamp": timestamp_s,
+                        "type": "OBJECT_DETECTED",
+                        "severity": compute_severity("OBJECT_DETECTED", details),
+                        "details": details,
+                    })
+
+            # append to global alerts
+            alerts.extend(frame_alerts)
+
+            # --- write annotated frame if enabled ---
+            if writer is not None:
+                self._draw_overlays(frame, frame_idx, timestamp_s, frame_alerts, frame_ctx)
+                writer.write(frame)
 
         cap.release()
+        if writer is not None:
+            writer.release()
 
-        duration_seconds = frame_idx / fps if fps > 0 else 0.0
-        summary = SessionSummary(
-            session_id=session_id,
-            duration_seconds=duration_seconds,
-            num_frames=frame_idx,
-            fps=fps,
-            alerts=alerts,
-        )
+        end_time = datetime.now()
+        duration_sec = frame_idx / fps if fps > 0 else 0.0
 
-        # --- audio analysis (if audio_path provided) ---
-        audio_summary = None
-        if audio_path:
-            try:
-                audio_summary = self.speaker_analyzer.analyze(audio_path)
-            except Exception as e:
-                audio_summary = {
-                    "error": f"Audio analysis failed: {str(e)}",
-                    "speaker_consistency_score": None,
-                }
+        # --- build session summary dataclass / dict ---
+        summary = {
+            "session_id": session_id,
+            "duration_seconds": duration_sec,
+            "num_frames": frame_idx,
+            "fps": fps,
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat(),
+            "annotated_video_path": annotated_path,
+        }
 
-        self._save_session_log(summary, audio_summary=audio_summary)
+        # --- scoring ---
+        from collections import Counter
+        type_counts = Counter(a["type"] for a in alerts)
+        total_alerts = len(alerts)
+        duration_min = duration_sec / 60.0 if duration_sec > 0 else 0.0
 
-        # --- 4. Generate PDF / HTML report (uses existing reporting module) ---
-        try:
-            self.report_generator.generate_offline_report_from_session_log(session_id)
-        except Exception as e:
-            # don't hard fail just because reporting failed
-            print(f"[WARN] Failed to generate report for {session_id}: {e}")
+        summary_stats = {
+            "total_alerts": total_alerts,
+            "by_type": dict(type_counts),
+            "alerts_per_minute": total_alerts / duration_min if duration_min > 0 else 0.0,
+            "duration_seconds": duration_sec,
+        }
 
-        return summary
+        video_score = compute_video_score(summary_stats, alerts)
+        audio_score = compute_audio_score(audio_summary)
+        overall_score = compute_overall_score(video_score, audio_score)
 
+        scores = {
+            "video": video_score,
+            "audio": audio_score,
+            "overall": overall_score,
+        }
+
+        # --- persist JSON log for dashboard ---
+        session_log = {
+            "session": summary,
+            "summary": summary_stats,
+            "alerts": alerts,
+            "scores": scores,
+            "audio": audio_summary or {},
+        }
+
+        self._save_session_log_json(session_id, session_log)
+
+        return session_log
     # -------------------------------------------------------------
     # Alert rule engine (high-level, config-driven)
     # -------------------------------------------------------------
-    def _generate_alerts(
-        self,
-        session_id: str,
-        frame_idx: int,
-        t: float,
-        face_present: bool,
-        gaze_direction: str,
-        eye_ratio: float,
-        mouth_moving: bool,
-        multiple_faces: bool,
-        num_faces: int,
-        objects_detected: bool,
-        object_list: List[Dict[str, Any]],
-        frame,
-    ) -> List[AlertEvent]:
+    def _generate_alerts(self, timestamp_s: float, frame_ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Generate behavior-aware alerts for a single frame.
+
+        Parameters
+        ----------
+        timestamp_s : float
+            Time of this frame in seconds from start.
+        frame_ctx : dict
+            Per-frame context, expected keys (all optional but recommended):
+
+            face_present: bool
+            face_missing_duration: float seconds
+            gaze_direction: 'left'|'right'|'up'|'down'|'center'
+            eye_ratio: float (EAR)
+            gaze_away_duration: float seconds
+            multiple_faces: bool
+            num_faces: int
+            mouth_moving: bool
+            objects: list of {label, confidence, bbox}
+
+        Returns
+        -------
+        list[dict]
+            Each dict has:
+            {
+              "timestamp": float,
+              "type": str,
+              "severity": str,
+              "details": dict
+            }
+        """
+        alerts: List[Dict[str, Any]] = []
+
+        # ---------- thresholds from config ----------
         det_cfg = self.cfg.get("detection", {})
-        eyes_cfg = det_cfg.get("eyes", {})
-        mouth_cfg = det_cfg.get("mouth", {})
+
+        # How long face must be missing before we alert (seconds)
+        face_missing_min_sec = float(
+            det_cfg.get("face", {}).get("missing_threshold_sec", 1.0)
+        )
+
+        # Gaze away threshold (seconds)
+        gaze_cfg = det_cfg.get("eyes", {})
+        gaze_min_sec = float(gaze_cfg.get("gaze_threshold", 2.0))
+
+        # Multi-face: minimum number of faces to consider a violation
         multi_face_cfg = det_cfg.get("multi_face", {})
-        objects_cfg = det_cfg.get("objects", {})
+        multi_face_min_faces = int(multi_face_cfg.get("min_faces", 2))
 
-        alerts: List[AlertEvent] = []
+        # ---------- extract context safely ----------
+        face_present = bool(frame_ctx.get("face_present", False))
+        face_missing_duration = float(frame_ctx.get("face_missing_duration", 0.0))
 
-        # --- Face missing ---
-        if not face_present:
-            evt = AlertEvent(
-                session_id=session_id,
-                timestamp=t,
-                frame_index=frame_idx,
-                type="FACE_MISSING",
-                severity="medium",
-                details={},
-            )
-            alerts.append(evt)
-            self._log_violation("FACE_MISSING", evt, frame)
+        gaze_direction = frame_ctx.get("gaze_direction", "center")
+        eye_ratio = float(frame_ctx.get("eye_ratio", 0.0))
+        gaze_away_duration = float(frame_ctx.get("gaze_away_duration", 0.0))
 
-        # --- Gaze away / eye ratio logic ---
-        # Example rule: if gaze_direction != "Center" for N consecutive frames, raise alert.
-        gaze_consec_frames = eyes_cfg.get("consecutive_frames", 3)
-        # Normalize gaze direction from detector
-        direction_norm = (gaze_direction or "").strip().lower()
+        multiple_faces = bool(frame_ctx.get("multiple_faces", False))
+        num_faces = int(frame_ctx.get("num_faces", 0))
 
-        # Treat these as "looking at screen"
-        center_like = {"center", "centre", "front"}
+        mouth_moving = bool(frame_ctx.get("mouth_moving", False))
 
-        if direction_norm not in center_like:
-            self._gaze_away_frames += 1
-        else:
-            self._gaze_away_frames = 0
+        objects = frame_ctx.get("objects", []) or []
 
-        if self._gaze_away_frames >= gaze_consec_frames:
-            evt = AlertEvent(
-                session_id=session_id,
-                timestamp=t,
-                frame_index=frame_idx,
-                type="GAZE_AWAY",
-                severity="medium",
-                details={
-                    "direction": direction_norm,
-                    "eye_ratio": float(eye_ratio),
-                },
-            )
-            alerts.append(evt)
-            self._log_violation("GAZE_AWAY", evt, frame)
-            self._gaze_away_frames = 0
+        # ---------- FACE_MISSING ----------
+        if (not face_present) and (face_missing_duration >= face_missing_min_sec):
+            details = {
+                "duration_sec": face_missing_duration,
+            }
+            alerts.append({
+                "timestamp": timestamp_s,
+                "type": "FACE_MISSING",
+                "severity": compute_severity("FACE_MISSING", details),
+                "details": details,
+            })
 
-        # --- Mouth movement ---
+        # ---------- GAZE_AWAY ----------
+        if gaze_direction in ("left", "right", "up", "down") and gaze_away_duration >= gaze_min_sec:
+            details = {
+                "direction": gaze_direction,
+                "eye_ratio": eye_ratio,
+                "duration_sec": gaze_away_duration,
+            }
+            alerts.append({
+                "timestamp": timestamp_s,
+                "type": "GAZE_AWAY",
+                "severity": compute_severity("GAZE_AWAY", details),
+                "details": details,
+            })
+
+        # ---------- MULTI_FACE ----------
+        if multiple_faces and num_faces >= multi_face_min_faces:
+            details = {
+                "num_faces": num_faces,
+            }
+            alerts.append({
+                "timestamp": timestamp_s,
+                "type": "MULTI_FACE",
+                "severity": compute_severity("MULTI_FACE", details),
+                "details": details,
+            })
+
+        # ---------- MOUTH_MOVEMENT ----------
+        # You can tune mouth_moving logic further, but this at least surfaces it.
         if mouth_moving:
-            self._mouth_moving_frames += 1
-        else:
-            self._mouth_moving_frames = 0
+            details = {
+                "note": "Mouth movement detected (possible talking)",
+            }
+            alerts.append({
+                "timestamp": timestamp_s,
+                "type": "MOUTH_MOVEMENT",
+                "severity": compute_severity("MOUTH_MOVEMENT", details),
+                "details": details,
+            })
 
-        mouth_thresh = mouth_cfg.get("movement_threshold", 3)
-        if self._mouth_moving_frames >= mouth_thresh:
-            evt = AlertEvent(
-                session_id=session_id,
-                timestamp=t,
-                frame_index=frame_idx,
-                type="MOUTH_MOVEMENT",
-                severity="medium",
-                details={},
-            )
-            alerts.append(evt)
-            self._log_violation("MOUTH_MOVEMENT", evt, frame)
-            self._mouth_moving_frames = 0
+        # ---------- OBJECT_DETECTED ----------
+        for obj in objects:
+            label = obj.get("label", "")
+            conf = float(obj.get("confidence", 0.0))
+            bbox = obj.get("bbox", None)
 
-        # --- Multiple faces ---
-        if multiple_faces:
-            self._multi_face_frames += 1
-        else:
-            self._multi_face_frames = 0
+            details = {
+                "label": label,
+                "confidence": conf,
+            }
+            if bbox is not None:
+                details["bbox"] = bbox
 
-        multi_face_thresh = multi_face_cfg.get("alert_threshold", 5)
-        if self._multi_face_frames >= multi_face_thresh:
-            evt = AlertEvent(
-                session_id=session_id,
-                timestamp=t,
-                frame_index=frame_idx,
-                type="MULTI_FACE",
-                severity="high",
-                details={"num_faces": int(num_faces)},
-            )
-            alerts.append(evt)
-            self._log_violation("MULTI_FACE", evt, frame)
-            self._multi_face_frames = 0
-
-        # --- Prohibited objects (phone, book, etc.) ---
-        if objects_detected and object_list:
-            for obj in object_list:
-                evt = AlertEvent(
-                    session_id=session_id,
-                    timestamp=t,
-                    frame_index=frame_idx,
-                    type="OBJECT_DETECTED",
-                    severity="high",
-                    details={
-                        "label": obj.get("label"),
-                        "confidence": float(obj.get("confidence", 0.0)),
-                        "bbox": obj.get("bbox", []),
-                    },
-                )
-                alerts.append(evt)
-                self._log_violation("OBJECT_DETECTED", evt, frame)
+            alerts.append({
+                "timestamp": timestamp_s,
+                "type": "OBJECT_DETECTED",
+                "severity": compute_severity("OBJECT_DETECTED", details),
+                "details": details,
+            })
 
         return alerts
+    
+    def _draw_overlays(self, frame, frame_idx: int, timestamp: float,
+                       frame_alerts: list, ctx: dict) -> None:
+        """
+        Draws diagnostic overlays on the frame:
+        - Frame index & timestamp
+        - Gaze direction, EAR, num faces
+        - Alert types/severity
+        - Face boxes (blue for main user, red for others)
+        - YOLO object boxes (phone/book/etc.)
+        - Gaze vector arrow
+        """
+        h, w = frame.shape[:2]
+        y = 30
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = 0.6
+        fg = (255, 255, 255)
+        bg = (0, 0, 0)
 
+        def put(text: str):
+            nonlocal y
+            cv2.putText(frame, text, (10, y + 1), font, scale, bg, 3, cv2.LINE_AA)
+            cv2.putText(frame, text, (10, y),     font, scale, fg, 1, cv2.LINE_AA)
+            y += 22
+
+        # Basic text info
+        put(f"Frame: {frame_idx}  t={timestamp:.2f}s")
+
+        if ctx.get("gaze_direction") is not None:
+            put(f"Gaze: {ctx['gaze_direction']}  EAR={ctx.get('eye_ratio', 0):.3f}")
+
+        if ctx.get("num_faces") is not None:
+            put(f"Faces: {ctx['num_faces']}")
+
+        # Show alerts for this frame
+        for a in frame_alerts:
+            t = a.get("type", "")
+            sev = a.get("severity", "")
+            put(f"ALERT: {t} [{sev}]")
+
+        # ----------------------------------------
+        # Face bounding boxes (BLUE = main user, RED = others)
+        # ----------------------------------------
+        face_boxes = ctx.get("face_boxes", []) or []
+        for i, box in enumerate(face_boxes):
+            x1, y1, x2, y2 = map(int, box)
+
+            if i == 0:
+                color = (255, 0, 0)     # BLUE in BGR? (0,0,255) is red; (255,0,0) is blue
+                label = "User"
+            else:
+                color = (0, 0, 255)     # RED
+                label = f"Other #{i}"
+
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(
+                frame,
+                label,
+                (x1, max(15, y1 - 5)),
+                font,
+                0.5,
+                color,
+                2,
+                cv2.LINE_AA,
+            )
+
+        # ----------------------------------------
+        # YOLO object boxes: phone/book/etc.
+        # ----------------------------------------
+        objects = ctx.get("objects") or []
+        for obj in objects:
+            label = obj.get("label", "")
+            conf = float(obj.get("confidence", 0.0))
+            bbox = obj.get("bbox", None)
+            if not bbox or len(bbox) != 4:
+                continue
+            x1, y1, x2, y2 = map(int, bbox)
+
+            # color by object type
+            if label in ("cell phone", "phone", "mobile"):
+                color = (0, 0, 255)      # red
+            elif label in ("book", "notebook"):
+                color = (0, 255, 255)    # yellow
+            else:
+                color = (0, 255, 0)      # green
+
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            text = f"{label} {conf:.2f}"
+            cv2.putText(frame, text, (x1, max(15, y1 - 5)),
+                        font, 0.5, color, 2, cv2.LINE_AA)
+
+        # ----------------------------------------
+        # Gaze vector arrow
+        # ----------------------------------------
+        gaze_vec = ctx.get("gaze_vector")
+        if gaze_vec is not None:
+            eye_center = gaze_vec.get("eye_center")
+            direction = gaze_vec.get("direction", "center")
+
+            if eye_center is not None:
+                ex, ey = int(eye_center[0]), int(eye_center[1])
+                # small dot at eye center
+                cv2.circle(frame, (ex, ey), 4, (255, 255, 0), -1)
+
+                length = 80
+                dx, dy = 0, 0
+                if direction == "left":
+                    dx = -length
+                elif direction == "right":
+                    dx = length
+                elif direction == "up":
+                    dy = -length
+                elif direction == "down":
+                    dy = length
+
+                end_point = (ex + dx, ey + dy)
+                cv2.arrowedLine(
+                    frame,
+                    (ex, ey),
+                    end_point,
+                    (255, 255, 0),
+                    2,
+                    cv2.LINE_AA,
+                )
     # -------------------------------------------------------------
     # Logging helpers
     # -------------------------------------------------------------
@@ -510,6 +727,13 @@ class OfflineExamAnalyzer:
         except Exception as e:
             print(f"[WARN] Failed to generate offline report: {e}")
 
+    def _save_session_log_json(self, session_id: str, data: dict) -> None:
+        out_path = self.logs_dir / f"{session_id}.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        import json
+        with open(out_path, "w") as f:
+            json.dump(data, f, indent=2)
+
 
     @staticmethod
     def _generate_session_id(video_path: str) -> str:
@@ -540,5 +764,4 @@ def analyze_recording(
     return analyzer.analyze_video(
         video_path=video_path,
         audio_path=audio_path,    # currently unused
-        session_id=session_id,
     )

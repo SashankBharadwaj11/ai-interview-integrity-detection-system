@@ -58,3 +58,9 @@ reporting:
     MULTIPLE_FACES: 4
     OBJECT_DETECTED: 5
     AUDIO_DETECTED: 3
+
+
+output:
+  annotated_video_dir: "./logs/annotated_videos"
+  save_annotated_video: true
+  annotated_codec: "mp4v"  # Codec for annotated video

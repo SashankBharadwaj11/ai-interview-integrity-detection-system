@@ -66,7 +66,7 @@ def upload_recording():
         if not allowed_file(video_file.filename, ALLOWED_VIDEO_EXT):
             flash("Invalid video format")
             return redirect(request.url)
-
+ 
         if not allowed_file(audio_file.filename, ALLOWED_AUDIO_EXT):
             flash("Invalid audio format")
             return redirect(request.url)
@@ -81,12 +81,7 @@ def upload_recording():
         video_file.save(video_path)
         audio_file.save(audio_path)
 
-        # Either call offline_processor.analyze_recording(...)
-        # or core.offline_runner.analyze_offline_session(...)
-        #
-        # Example if using analyze_recording:
-        from ..offline_processor import analyze_recording
-        summary = analyze_recording(
+        session_log = analyze_recording(
             video_path=str(video_path),
             audio_path=str(audio_path),
             session_id=session_id,
@@ -94,10 +89,15 @@ def upload_recording():
             logs_dir=str(LOGS_DIR),
         )
 
-        flash(f"Processed session {summary.session_id} with {len(summary.alerts)} alerts")
-        return redirect(url_for("session_report", session_id=session_id))
+        session_info = session_log.get("session", {})
+        sid = session_info.get("session_id", session_id)
+        num_alerts = len(session_log.get("alerts", []))
+
+        flash(f"Processed session {sid} with {num_alerts} alerts")
+        return redirect(url_for("session_report", session_id=sid))
 
     return render_template("upload.html")
+
 
 
 # ---------- SESSION REPORT ROUTE ----------
@@ -113,9 +113,9 @@ def session_report(session_id):
 
     return render_template(
         "session_report.html",
-        session=data.get("session", {}),
-        summary=data.get("summary", {}),
-        alerts=data.get("alerts", []),
+        session=data["session"],
+        summary=data["summary"],
+        alerts=data["alerts"],
         scores=data.get("scores", {}),
         audio=data.get("audio", {}),
     )

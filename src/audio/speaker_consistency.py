@@ -204,5 +204,6 @@ class SpeakerConsistencyAnalyzer:
             }
 
         embeddings = self._get_embeddings_for_chunks(chunks)
+        result["chunk_sec"] = self.chunk_sec
         result = self._analyze_speaker_consistency(embeddings)
         return result
