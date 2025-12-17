@@ -17,7 +17,7 @@ Everything is processed **locally** — no cloud upload or external servers.
 
 ---
 
-# 📌 Table of Contents
+# Table of Contents
 
 1. [Features](#-features)  
 2. [Project Architecture](#-project-architecture)  
@@ -27,14 +27,13 @@ Everything is processed **locally** — no cloud upload or external servers.
 6. [Scoring System](#-scoring-system)  
 7. [Models Used](#-models-used)  
 8. [Configuration](#-configuration)  
-9. [Privacy](#-privacy)  
-10. [Future Enhancements](#-future-enhancements)
+9. [Future Enhancements](#-future-enhancements)
 
 ---
 
-# 🚀 Features
+## Features
 
-## 🎞️ Video Analysis  
+## Video Analysis  
 - Face detection (MTCNN)  
 - Eye tracking (MediaPipe FaceMesh)  
 - Gaze direction classification  
@@ -42,19 +41,19 @@ Everything is processed **locally** — no cloud upload or external servers.
 - Face-missing alerts  
 - Multi-face detection  
 
-## 📦 Object Detection  
+## Object Detection  
 - YOLOv8-Nano  
 - Detects: mobile phones, books, paper  
 - FPS-aware optimized inference  
 
-## 🔊 Audio Integrity Analysis  
+## Audio Integrity Analysis  
 - WavLM-Base+ embeddings  
 - Chunk-based speaker similarity  
 - Minimum/average similarity  
 - Speaker change detection  
 - Audio integrity score (0–100)  
 
-## 📑 Session Integrity Report  
+## Session Integrity Report  
 - Timeline graphs (Chart.js)  
 - Speaker consistency graph  
 - Gaze + object alerts  
@@ -64,7 +63,7 @@ Everything is processed **locally** — no cloud upload or external servers.
 
 ---
 
-# 🧱 Project Architecture
+# Project Architecture
 
 ```plaintext
 ai-interview-integrity-detection-system/
@@ -105,87 +104,92 @@ ai-interview-integrity-detection-system/
 │
 ├── requirements.txt
 └── README.md
+```
 ---
 
-# ⚙️ Installation
+# Installation
 
-## 1️⃣ Create Conda Environment
+1. Create Conda Environment
 ```bash
 conda create -n interview310 python=3.10
 conda activate interview310
-2️⃣ Install Dependencies
-bash
-Copy code
+```
+2. Install Dependencies
+```bash
 pip install -r requirements.txt
-3️⃣ Install ffmpeg (Required for audio extraction)
+```
+3. Install ffmpeg (Required for audio extraction)
 macOS:
-bash
-Copy code
+```bash
 brew install ffmpeg
-🧪 Running the Application
+```
+Running the Application
 Start the Flask dashboard:
-
-bash
-Copy code
+```bash
 python -m src.dashboard.app
 Now open:
-
-cpp
-Copy code
 http://127.0.0.1:5000
-📤 How to Use the System
-Upload video recording
+```
 
-Upload audio recording
+---
 
-Click Analyze Recording
+## How to Use the System
 
-Processing time: 1–2 min per 15 min video
+1. Upload the **video recording**
+2. Upload the **audio recording**
+3. Click **Analyze Recording**
+4. Processing time: ** 5-10 minutes per 15-minute video**
+5. View the **Session Integrity Report**
 
-View Session Integrity Report
+---
 
-📊 Scoring System
-🎞️ Video Integrity Score (0–100)
-Penalties for:
+## Scoring System
 
-Face missing
+### Video Integrity Score (0–100)
 
-Looking away (L/R/U/D)
+Penalties are applied for:
+- Face missing
+- Looking away (Left / Right / Up / Down)
+- Excessive eye movement
+- Multi-face detection
+- Forbidden objects
 
-Excessive eye movement
+---
 
-Multi-face detection
+### Audio Integrity Score (0–100)
 
-Forbidden objects
+Based on **WavLM speaker similarity**:
+- High similarity → same speaker
+- Low similarity → possible speaker switch
+- `speaker_change_flag = True` → penalty applied
 
-🔊 Audio Integrity Score (0–100)
-Based on WavLM similarity:
+---
 
-High similarity = same speaker
+### Combined Overall Score
 
-Low similarity = possible switch
-
-speaker_change_flag = True → penalty applied
-
-⭐ Combined Overall Score
-Formula:
-
-python
-Copy code
+```python
 overall_score = 0.7 * video_score + 0.3 * audio_score
-🧠 Models Used
-Task	Model	Framework
-Face Detection	MTCNN	facenet-pytorch
-Eye Tracking	FaceMesh	MediaPipe
-Object Detection	YOLOv8n	Ultralytics
-Speaker Embeddings	WavLM-Base+	HuggingFace Transformers
-Audio Extraction	ffmpeg	subprocess
+```
 
-🧩 Configuration (config.yaml)
-Below is a sample config:
+---
 
-yaml
-Copy code
+## Models Used
+
+| Task | Model | Framework |
+|------|-------|-----------|
+| Face Detection | MTCNN | facenet-pytorch |
+| Eye Tracking | FaceMesh | MediaPipe |
+| Object Detection | YOLOv8n | Ultralytics |
+| Speaker Embeddings | WavLM-Base+ | HuggingFace Transformers |
+| Audio Extraction | ffmpeg | subprocess |
+
+---
+
+## Configuration (`config.yaml`)
+
+Sample configuration:
+
+```yaml
 detection:
   face:
     detection_interval: 5
@@ -201,36 +205,17 @@ detection:
 
 audio_monitoring:
   sample_rate: 16000
-Modify these to customize system behavior.
+```
 
-🧼 Code Quality Improvements
-Unified scoring pipeline
+---
 
-Robust JSON schema
+## Future Enhancements
 
-Cleaner Jinja templates
+- Real-time webcam detection
+- Emotion detection
+- OCR for desk notes
+- Multi-speaker diarization
+- Deepfake voice detection
+- GPU FastAPI deployment
 
-YOLO inference optimization
-
-Isolated audio subsystem
-
-Environment fixes
-
-Removed duplicate envs + conflicts
-
-Support for command-line offline processing
-
-
-📬 Future Enhancements
-Real-time webcam detection
-
-Emotion detection
-
-OCR for desk notes
-
-Multi-speaker diarization
-
-Deepfake voice detection
-
-GPU FastAPI deployment
-
+---
