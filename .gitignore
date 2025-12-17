@@ -33,3 +33,7 @@ models/
 *.mp4
 logs/
 logs/**
+
+# Ignore generated artifacts
+logs/
+*.mp4
