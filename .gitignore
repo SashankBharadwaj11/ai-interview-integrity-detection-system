@@ -28,3 +28,8 @@ logs/sessions/*
 # Model / downloaded weights
 models/
 .checkpoints/
+
+# Ignore generated videos/logs
+*.mp4
+logs/
+logs/**
